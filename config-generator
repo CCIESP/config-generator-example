@@ -1,0 +1,186 @@
+#2/24/17
+import sys
+import os
+
+#is the PE an IOS-XE/IOS or IOS-XR device?
+dash = "-" * 75
+os.system('cls')
+print dash
+print dash
+print "This program is built to quickly generate large numbers of L2VPN device"
+print "configuration based on the routers operating system."
+print dash
+print dash
+device = raw_input("Is the PE an IOS, IOS-XE or IOS-XR device? ").upper()
+
+if device in ['IOS-XE', 'XE']:
+     device = 'IOS-XE'
+elif device in ['IOS-XR','XR']:
+    device = 'IOS-XR'
+elif device in ['IOS']:
+        device = 'IOS'
+else:
+    print "Please verify your input and try again!"
+    device = raw_input("Is the PE an IOS/IOS-XE or IOS-XR device? ").upper()
+
+#grab how many sub-interfaces are needed to be created
+lines = 0
+i = 0
+finish = 0
+lines = int(raw_input ("How many sub-interfaces do you need to create? "))
+i = int(raw_input("What is the starting number for your sub-interface? "))
+finish = (i+lines)-1
+
+
+#grab the device name and create a file
+device_name = raw_input ("What is the device name? ").upper()
+device_name = device_name+'.cfg'
+out_file = open(device_name, 'w')
+
+#grab the interface type, reset it to a usable variable for the device CLI
+router_interface = raw_input("What is the speed of the interface? 100M, 1G, 10G, 100G: ").upper()
+if router_interface == '100M':
+    router_interface = "FastEthernet"
+elif router_interface == "1G":
+    router_interface = "GigabitEthernet"
+elif router_interface == "10G":
+    router_interface = "TenGigabitEthernet"
+elif router_interface == "100G":
+    router_interface = "HundredGigE"
+else:
+    print "Please verify the type of interface"
+    router_interface = raw_input ("What is the speed of the interface? 100M, 1G, 10G, 100G: ")
+
+#grab the interface number for the device CLI
+interface_number = raw_input ("please enter the interface number, some examples are 0/0, 0/0/1 or 0/0/0/1: ")
+
+#grab the IP of the far end PE to create the PW with
+# Make sure the IP has four octets
+not_done = True
+while not_done:
+
+    PE_IP = raw_input("please enter the ipv4 address of the other PE: ")
+
+    valid_ip = True
+
+# Make sure the IP has four octets
+
+    octets = PE_IP.split(".")
+    if len(octets) != 4:
+        print "\nYou don't have 4 octets - try again."
+        continue
+
+#convert octet from string to int
+    for j, octet in enumerate(octets):
+
+        try:
+            octets[j] = int(octet)
+        except ValueError:
+            valid_ip = False
+
+    if not valid_ip:
+        print "You entered an octet that wasnt an integer (or a blank octet)"
+        continue
+
+    first_octet, second_octet, third_octet, fourth_octet = octets
+
+    if first_octet > 223:
+        valid_ip = False
+    elif first_octet == 127:
+        valid_ip = False
+
+    if first_octet == 169 and second_octet == 254:
+        valid_ip = False
+
+    for octet in (second_octet, third_octet, fourth_octet):
+        if (octet < 0) or (octet > 255):
+            valid_ip = False
+
+    if valid_ip:
+        not_done = False
+    else:
+        print "\nInvalid IP address, please try again."
+
+if device == 'IOS-XR':
+#build the PW class for the l2vpn on ios-xr
+    out_file.write("conf t\n")
+    out_file.write("!\n")
+    out_file.write("l2vpn pw-class standard\n")
+    out_file.write("l2vpn pw-class standard encapsulation mpls\n")
+    out_file.write("!\n")
+    out_file.write("root\n")
+    out_file.write("!\n")
+    out_file.write("interface %s %s\n" % (router_interface, interface_number))
+    out_file.write("no shut\n")
+    out_file.write("!\n")
+    out_file.write("root\n")
+
+#build out each sub-interface and l2vpn section for the PW on an ios-xr PE
+    while i <= finish:
+        out_file.write("interface %s %s.%s l2transport\n" % (router_interface, interface_number, i))
+        out_file.write("description Test EVC vlan %s\n" % i)
+        out_file.write("encapsulation dot1q %s\n" % i)
+        out_file.write("rewrite ingress tag pop 1 symmetric\n")
+        out_file.write("!\n")
+        out_file.write("root\n")
+        out_file.write("!\n")
+        out_file.write("l2vpn bridge group TEST\n")
+        out_file.write("l2vpn bridge group TEST bridge-domain 100-%s\n" % i)
+        out_file.write("l2vpn bridge group TEST bridge-domain 100-%s interface %s %s.%s\n" % (i, router_interface, interface_number, i))
+        out_file.write("l2vpn bridge group TEST bridge-domain 100-%s vfi 100-%s\n" %(i, i))
+        out_file.write("l2vpn bridge group TEST bridge-domain 100-%s vfi 100-%s neighbor %s pw-id 100%s\n" %(i, i, PE_IP, i))
+        out_file.write("l2vpn bridge group TEST bridge-domain 100-%s vfi 100-%s neighbor %s pw-id 100%s pw-class standard\n" %(i, i, PE_IP, i))
+        out_file.write("!\n")
+        i = i+1
+
+elif device == 'IOS-XE':
+    out_file.write("conf t\n")
+    out_file.write("!\n")
+    out_file.write("interface %s %s\n" % (router_interface, interface_number))
+    out_file.write("description Test EVC main interface\n")
+    out_file.write("no shut\n")
+    out_file.write("!\n")
+#build out each sub-interface and l2vpn section for the PW on an ios-xe PE
+    while i <= finish:
+        out_file.write("interface %s %s\n" % (router_interface, interface_number))
+        out_file.write("service instance %s ethernet\n" % i)
+        out_file.write("description Test EVC vlan %s\n" % i)
+        out_file.write("encapsulation dot1q %s\n" % i)
+        out_file.write("bridge-domain %s\n" % i)
+        out_file.write("!\n")
+        out_file.write("exit\n")
+        out_file.write("!\n")
+        out_file.write("l2 vfi VPLS_%s_VLAN_%s manual\n" %(PE_IP, i))
+        out_file.write("vpn id 100%s\n" % i)
+        out_file.write("bridge-domain %s\n" % i)
+        out_file.write("neighbor %s encapsulation mpls\n" % PE_IP)
+        out_file.write("!\n")
+        out_file.write("exit\n")
+        out_file.write("!\n")
+        i = i+1
+        
+elif device == 'IOS':
+    out_file.write("conf t\n")
+    out_file.write("!\n")
+    out_file.write("interface %s %s\n" % (router_interface, interface_number))
+    out_file.write("no shut\n")
+    out_file.write("!\n")
+#build out each sub-interface and l2vpn section for the PW on an ios PE
+    while i <= finish:
+        out_file.write("interface %s %s.%s\n" % (router_interface, interface_number, i))
+        out_file.write("description Test EVC vlan %s\n" % i)
+        out_file.write("encapsulation dot1q %s\n" % i)
+        out_file.write("xconnect %s 100%s encapsulation mpls\n" %(PE_IP, i))
+        out_file.write("!\n")
+        i = i+1
+else:
+    sys.exit("\n\nDEVICE OS NOT DETECTED TO BUILD CONFIGURATION")
+
+print dash
+print dash
+print "The following file has been created %s" %device_name
+print "The file is located at:"+os.getcwd()
+print dash
+print dash
+#close the file
+out_file.close
